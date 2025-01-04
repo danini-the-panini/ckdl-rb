@@ -1,0 +1,25 @@
+PATH
+  remote: .
+  specs:
+    ckdl (0.1.0)
+
+GEM
+  remote: https://rubygems.org/
+  specs:
+    minitest (5.25.4)
+    rake (13.2.1)
+    rake-compiler (1.2.9)
+      rake
+
+PLATFORMS
+  arm64-darwin-24
+  ruby
+
+DEPENDENCIES
+  ckdl!
+  minitest (~> 5.16)
+  rake (~> 13.0)
+  rake-compiler
+
+BUNDLED WITH
+   2.6.2
