@@ -3,6 +3,8 @@
 module CKDL
   class Parser
     def initialize(input, version: KDL.default_version, **options)
+      @input = input
+
       case input
       when String then create_string_parser(input, version)
       when IO then create_stream_parser(input, version)

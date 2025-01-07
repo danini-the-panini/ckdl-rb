@@ -5,6 +5,7 @@ require "kdl"
 require_relative "ckdl/version"
 require_relative "ckdl/libckdl"
 require_relative "ckdl/parser"
+require_relative "ckdl/emitter"
 
 module CKDL
   def parse(input, version: default_version, **options)
