@@ -15,4 +15,10 @@ Rake::ExtensionTask.new("ckdl", GEMSPEC) do |ext|
   ext.lib_dir = "lib/ckdl"
 end
 
+task :clobber_vendor do
+  FileUtils.rm_rf(File.join(__dir__, "ext/vendor"))
+end
+
+task clobber: :clobber_vendor
+
 task default: %i[clobber compile test]

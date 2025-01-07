@@ -13,3 +13,4 @@
 *.a
 mkmf.log
 compile_commands.json
+/ext/vendor

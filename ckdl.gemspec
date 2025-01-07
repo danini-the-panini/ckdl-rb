@@ -4,7 +4,7 @@ require_relative "lib/ckdl/version"
 
 Gem::Specification.new do |spec|
   spec.name = "ckdl"
-  spec.version = Ckdl::VERSION
+  spec.version = CKDL::VERSION
   spec.authors = ["Danielle Smith"]
   spec.email = ["code@danini.dev"]
 

@@ -2,7 +2,7 @@
 
 require "test_helper"
 
-class TestCkdl < Minitest::Test
+class TestCKDL < Minitest::Test
   def test_that_it_has_a_version_number
     refute_nil ::Ckdl::VERSION
   end
