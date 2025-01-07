@@ -6,8 +6,8 @@ require_relative "ckdl/version"
 require_relative "ckdl/libckdl"
 require_relative "ckdl/parser"
 
-module KDL
-  def self.parse(input, version: default_version, **options)
+module CKDL
+  def parse(input, version: default_version, **options)
     version_option = case version
     when 1 then CKDL::Parser::READ_VERSION_1
     when 2 then CKDL::Parser::READ_VERSION_2
@@ -17,17 +17,21 @@ module KDL
     CKDL::Parser.new(input, version: version_option, **options).parse
   end
 
-  def self.load_file(filespec, **options)
+  def load_file(filespec, **options)
     File.open(filespec, 'r:BOM|UTF-8') do |file|
       load_stream(io, **options)
     end
   end
 
-  def self.load_stream(io, **options)
+  def load_stream(io, **options)
     parse(io, **options)
   end
 
-  def self.auto_parse(input, **options)
+  def auto_parse(input, **options)
     parse(input, version: nil, **options)
   end
+
+  extend self
 end
+
+KDL.singleton_class.module_eval { prepend CKDL }
