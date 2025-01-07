@@ -5,20 +5,14 @@ require "minitest/test_task"
 
 Minitest::TestTask.create
 
-require "rake/extensiontask"
+desc "Compile binary extension"
+task :compile do
+  require 'tempfile'
+  Dir.chdir(Dir.tmpdir) do # rubocop:disable ThreadSafety/DirChdir
+    sh "ruby '#{File.join(__dir__, 'ext', 'extconf.rb')}'"
+  end
+end
 
 task build: :compile
-
-GEMSPEC = Gem::Specification.load("ckdl.gemspec")
-
-Rake::ExtensionTask.new("ckdl", GEMSPEC) do |ext|
-  ext.lib_dir = "lib/ckdl"
-end
-
-task :clobber_vendor do
-  FileUtils.rm_rf(File.join(__dir__, "ext/vendor"))
-end
-
-task clobber: :clobber_vendor
 
 task default: %i[clobber compile test]

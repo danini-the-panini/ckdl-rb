@@ -1,0 +1,3 @@
+[submodule "ext/libkdl"]
+	path = ext/libkdl
+	url = git@github.com:tjol/ckdl
