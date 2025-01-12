@@ -1,8 +1,4 @@
 #include "ckdl.h"
-#include "kdl/emitter.h"
-#include "kdl/value.h"
-#include "ruby/internal/core/rdata.h"
-#include "ruby/internal/intern/object.h"
 
 VALUE rb_mCKDL;
 VALUE rb_cParseError;
@@ -96,8 +92,13 @@ VALUE ckdl_str(kdl_str const *str) {
 
 kdl_str ckdl_kstr(VALUE str) {
     kdl_str kstr;
-    kstr.data = rb_string_value_ptr(&str);
-    kstr.len = RSTRING_LEN(str);
+    if (NIL_P(str)) {
+        kstr.data = NULL;
+        kstr.len = 0;
+    } else {
+        kstr.data = rb_string_value_ptr(&str);
+        kstr.len = RSTRING_LEN(str);
+    }
     return kstr;
 }
 
@@ -375,7 +376,6 @@ VALUE rb_ckdl_emitter_emit_value(VALUE self, VALUE value) {
 
     return ckdl_emitter_buffer(emitter);
 }
-
 
 void ckdl_set_float_mode(VALUE float_mode, kdl_emitter_options *options) {
     VALUE opt;
