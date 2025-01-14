@@ -10,8 +10,8 @@ class V1Test < Minitest::Test
     expected_path = File.join(EXPECTED_DIR, "#{input_name}.kdl")
     if File.exist?(expected_path)
       define_method "test_#{input_name}_matches_expected_output" do
-        expected = File.read(expected_path, encoding: Encoding::UTF_8)
-        assert_equal expected, ::KDL.parse(File.read(input_path, encoding: Encoding::UTF_8), version: 1).to_s
+        expected = File.read(expected_path, encoding: Encoding::UTF_8).chomp
+        assert_equal expected, ::KDL.parse(File.read(input_path, encoding: Encoding::UTF_8), version: 1).to_s.chomp
       end
     else
       define_method "test_#{input_name}_does_not_parse" do

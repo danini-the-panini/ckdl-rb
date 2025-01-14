@@ -1,4 +1,5 @@
 #include "ckdl.h"
+#include "ruby/re.h"
 
 VALUE rb_mCKDL;
 VALUE rb_cParseError;
@@ -8,15 +9,6 @@ VALUE rb_cEmitter;
 VALUE rb_eEmitError;
 
 VALUE rb_mKDL;
-VALUE rb_cDocument;
-VALUE rb_cNode;
-VALUE rb_cValue;
-VALUE rb_cValueString;
-VALUE rb_cValueInt;
-VALUE rb_cValueFloat;
-VALUE rb_cValueBool;
-VALUE rb_cValueNull;
-VALUE rb_KDLNull;
 
 VALUE rb_cBigDecimal;
 
@@ -30,8 +22,41 @@ ID id_children;
 ID id_as_type;
 ID id_bigdecimal;
 
+VALUE ckdl_str(kdl_str const *str) {
+    if (!str->data) return Qnil;
+    return rb_utf8_str_new(str->data, str->len);
+}
+
+kdl_str ckdl_kstr(VALUE str) {
+    kdl_str kstr;
+    if (NIL_P(str)) {
+        kstr.data = NULL;
+        kstr.len = 0;
+    } else {
+        kstr.data = rb_string_value_ptr(&str);
+        kstr.len = RSTRING_LEN(str);
+    }
+    return kstr;
+}
+
+typedef struct s_output_module {
+    VALUE Document;
+    VALUE Node;
+    VALUE Value;
+    VALUE ValueString;
+    VALUE ValueInt;
+    VALUE ValueFloat;
+    VALUE ValueBool;
+    VALUE ValueNull;
+    VALUE Null;
+} output_module;
+
+output_module KDL;
+output_module KDL_V1;
+
 typedef struct s_parser {
     kdl_parser *parser;
+    output_module *output;
 } Parser;
 
 void free_parser(Parser *parser) {
@@ -57,15 +82,22 @@ VALUE parser_alloc(VALUE self) {
     return TypedData_Wrap_Struct(self, &parser_type, parser);
 }
 
-VALUE rb_ckdl_parser_create_string_parser(VALUE self, VALUE string, VALUE version) {
+output_module *ckdl_output_module(VALUE output_version) {
+    int outv = NUM2INT(output_version);
+    switch (outv) {
+    case 1: return &KDL_V1; break;
+    default: rb_warn("Unknown output_version `%i', defaulting to v2", outv);
+    case 2: return &KDL; break;
+    }
+}
+
+VALUE rb_ckdl_parser_create_string_parser(VALUE self, VALUE string, VALUE version, VALUE output_version) {
     Parser *parser;
     TypedData_Get_Struct(self, Parser, &parser_type, parser);
 
-    kdl_owned_string str;
-    str.data = rb_string_value_ptr(&string);
-    str.len = rb_str_strlen(string);
-
-    parser->parser = kdl_create_string_parser(kdl_borrow_str(&str), NUM2INT(version));
+    kdl_str str = ckdl_kstr(string);
+    parser->parser = kdl_create_string_parser(str, NUM2INT(version));
+    parser->output = ckdl_output_module(output_version);
 
     return Qnil;
 }
@@ -76,30 +108,14 @@ size_t ckdl_read_io(void *user_data, char *buf, size_t bufsize) {
     return 0;
 }
 
-VALUE rb_ckdl_parser_create_stream_parser(VALUE self, VALUE io, VALUE version) {
+VALUE rb_ckdl_parser_create_stream_parser(VALUE self, VALUE io, VALUE version, VALUE output_version) {
     Parser *parser;
     TypedData_Get_Struct(self, Parser, &parser_type, parser);
 
     parser->parser = kdl_create_stream_parser(ckdl_read_io, (void*)io, NUM2INT(version));
+    parser->output = ckdl_output_module(output_version);
 
     return Qnil;
-}
-
-VALUE ckdl_str(kdl_str const *str) {
-    if (!str->data) return Qnil;
-    return rb_utf8_str_new(str->data, str->len);
-}
-
-kdl_str ckdl_kstr(VALUE str) {
-    kdl_str kstr;
-    if (NIL_P(str)) {
-        kstr.data = NULL;
-        kstr.len = 0;
-    } else {
-        kstr.data = rb_string_value_ptr(&str);
-        kstr.len = RSTRING_LEN(str);
-    }
-    return kstr;
 }
 
 kdl_number ckdl_int(VALUE val) {
@@ -118,6 +134,8 @@ kdl_number ckdl_dbl(VALUE val) {
     kdl_number num;
     if (rb_obj_is_kind_of(val, rb_cBigDecimal)) {
         num.type = KDL_NUMBER_TYPE_STRING_ENCODED;
+        VALUE str = rb_String(val);
+        printf("emit str: %s\n", StringValueCStr(str));
         num.string = ckdl_kstr(rb_String(val));
     } else {
         num.type = KDL_NUMBER_TYPE_FLOATING_POINT;
@@ -131,19 +149,19 @@ kdl_value *ckdl_kval(VALUE value) {
     VALUE val = rb_funcall(value, id_value, 0);
     kdl_value *kval = malloc(sizeof(kdl_value));
     kval->type_annotation = ckdl_kstr(type);
-    if (rb_obj_is_kind_of(value, rb_cValueString)) {
+    if (rb_obj_is_kind_of(value, KDL.ValueString)) {
         kval->type = KDL_TYPE_STRING;
         kval->string = ckdl_kstr(rb_funcall(value, id_value, 0));
-    } else if (rb_obj_is_kind_of(value, rb_cValueInt)) {
+    } else if (rb_obj_is_kind_of(value, KDL.ValueInt)) {
         kval->type = KDL_TYPE_NUMBER;
         kval->number = ckdl_int(val);
-    } else if (rb_obj_is_kind_of(value, rb_cValueFloat)) {
+    } else if (rb_obj_is_kind_of(value, KDL.ValueFloat)) {
         kval->type = KDL_TYPE_NUMBER;
         kval->number = ckdl_dbl(val);
-    } else if (rb_obj_is_kind_of(value, rb_cValueBool)) {
+    } else if (rb_obj_is_kind_of(value, KDL.ValueBool)) {
         kval->type = KDL_TYPE_BOOLEAN;
         kval->boolean = RTEST(val);
-    } else if (rb_obj_is_kind_of(value, rb_cValueNull)) {
+    } else if (rb_obj_is_kind_of(value, KDL.ValueNull)) {
         kval->type = KDL_TYPE_NULL;
     } else {
         rb_raise(rb_eEmitError, "unable to convert value");
@@ -161,66 +179,66 @@ void ckdl_raise_parse_error(kdl_event_data *data) {
     }
 }
 
-VALUE ckdl_bignum(const kdl_number *num) {
+VALUE ckdl_bignum(const kdl_number *num, output_module *kdl) {
     VALUE str = ckdl_str(&num->string);
-    VALUE result = rb_str_to_inum(str, 0, FALSE);
-    if (result == INT2FIX(0)) {
-        result = rb_funcall(rb_mKernel, id_bigdecimal, 1, str);
-        return rb_funcall(rb_cValueFloat, id_new, 1, result);
+    if (rb_reg_search(rb_reg_new_str(rb_str_new2("\\A\\d+\\z"), 0), str, 0, 0) == -1) {
+        VALUE result = rb_funcall(rb_mKernel, id_bigdecimal, 1, str);
+        return rb_funcall(kdl->ValueFloat, id_new, 1, result);
+    } else {
+        return rb_funcall(kdl->ValueInt, id_new, 1, rb_str_to_inum(str, 0, FALSE));
     }
-    return rb_funcall(rb_cValueInt, id_new, 1, result);
 }
 
-VALUE ckdl_number(const kdl_number *num) {
+VALUE ckdl_number(const kdl_number *num, output_module *kdl) {
     switch (num->type) {
         case KDL_NUMBER_TYPE_INTEGER:
-            return rb_funcall(rb_cValueInt, id_new, 1, ULL2NUM(num->integer));
+            return rb_funcall(kdl->ValueInt, id_new, 1, rb_ll2inum(num->integer));
         case KDL_NUMBER_TYPE_FLOATING_POINT:
-            return rb_funcall(rb_cValueFloat, id_new, 1, DBL2NUM(num->floating_point));
+            return rb_funcall(kdl->ValueFloat, id_new, 1, rb_float_new(num->floating_point));
         case KDL_NUMBER_TYPE_STRING_ENCODED:
-            return ckdl_bignum(num);
+            return ckdl_bignum(num, kdl);
     }
 }
 
-VALUE ckdl_value(const kdl_value *value) {
+VALUE ckdl_value(const kdl_value *value, output_module *kdl) {
     VALUE kdl_value;
 
     switch (value->type) {
     case KDL_TYPE_NULL:
-        kdl_value = rb_KDLNull;
+        kdl_value = kdl->Null;
     break;
     case KDL_TYPE_BOOLEAN:
-        kdl_value = rb_funcall(rb_cValueBool, id_new, 1, value->boolean ? Qtrue : Qfalse);
+        kdl_value = rb_funcall(kdl->ValueBool, id_new, 1, value->boolean ? Qtrue : Qfalse);
     break;
     case KDL_TYPE_NUMBER:
-        kdl_value = ckdl_number(&value->number);
+        kdl_value = ckdl_number(&value->number, kdl);
     break;
     case KDL_TYPE_STRING:
-        kdl_value = rb_funcall(rb_cValueString, id_new, 1, ckdl_str(&value->string));
+        kdl_value = rb_funcall(kdl->ValueString, id_new, 1, ckdl_str(&value->string));
     break;
     }
 
     return rb_funcall(kdl_value, id_as_type, 1, ckdl_str(&value->type_annotation));
 }
 
-kdl_event_data *ckdl_push_nodes(kdl_parser *parser, kdl_event_data *data, VALUE nodes);
+kdl_event_data *ckdl_push_nodes(Parser *parser, kdl_event_data *data, VALUE nodes);
 
-void ckdl_push_node(kdl_parser *parser, kdl_event_data *data, VALUE nodes) {
+void ckdl_push_node(Parser *parser, kdl_event_data *data, VALUE nodes) {
     VALUE name = ckdl_str(&data->name);
     VALUE type = ckdl_str(&data->value.type_annotation);
     VALUE args = rb_ary_new();
     VALUE props = rb_hash_new();
     VALUE children = rb_ary_new();
-    data = kdl_parser_next_event(parser);
+    data = kdl_parser_next_event(parser->parser);
     while (1) {
         switch (data->event) {
             case KDL_EVENT_ARGUMENT:
-                rb_ary_push(args, ckdl_value(&data->value));
-                data = kdl_parser_next_event(parser);
+                rb_ary_push(args, ckdl_value(&data->value, parser->output));
+                data = kdl_parser_next_event(parser->parser);
             break;
             case KDL_EVENT_PROPERTY:
-                rb_hash_aset(props, ckdl_str(&data->name), ckdl_value(&data->value));
-                data = kdl_parser_next_event(parser);
+                rb_hash_aset(props, ckdl_str(&data->name), ckdl_value(&data->value, parser->output));
+                data = kdl_parser_next_event(parser->parser);
             break;
             case KDL_EVENT_START_NODE:
                 data = ckdl_push_nodes(parser, data, children);
@@ -234,7 +252,7 @@ void ckdl_push_node(kdl_parser *parser, kdl_event_data *data, VALUE nodes) {
                     rb_hash_aset(new_args[1], ID2SYM(id_args), args);
                     rb_hash_aset(new_args[1], ID2SYM(id_props), props);
                     rb_hash_aset(new_args[1], ID2SYM(id_children), children);
-                    rb_ary_push(nodes, rb_funcallv_kw(rb_cNode, id_new, 2, new_args, RB_PASS_KEYWORDS));
+                    rb_ary_push(nodes, rb_funcallv_kw(parser->output->Node, id_new, 2, new_args, RB_PASS_KEYWORDS));
                     free(new_args);
                 }
                 return;
@@ -244,7 +262,7 @@ void ckdl_push_node(kdl_parser *parser, kdl_event_data *data, VALUE nodes) {
     }
 }
 
-kdl_event_data *ckdl_push_nodes(kdl_parser *parser, kdl_event_data *data, VALUE nodes) {
+kdl_event_data *ckdl_push_nodes(Parser *parser, kdl_event_data *data, VALUE nodes) {
     while (1) {
         switch (data->event) {
             case KDL_EVENT_START_NODE:
@@ -258,7 +276,7 @@ kdl_event_data *ckdl_push_nodes(kdl_parser *parser, kdl_event_data *data, VALUE 
             default:
                 ckdl_raise_parse_error(data);
         }
-        data = kdl_parser_next_event(parser);
+        data = kdl_parser_next_event(parser->parser);
     }
 }
 
@@ -268,12 +286,12 @@ VALUE rb_ckdl_parser_parse(VALUE self) {
 
     VALUE nodes = rb_ary_new();
 
-    kdl_event_data *data = ckdl_push_nodes(parser->parser, kdl_parser_next_event(parser->parser), nodes);
+    kdl_event_data *data = ckdl_push_nodes(parser, kdl_parser_next_event(parser->parser), nodes);
     if (data->event != KDL_EVENT_EOF) {
         ckdl_raise_parse_error(data);
     }
 
-    return rb_funcall(rb_cDocument, id_new, 1, nodes);
+    return rb_funcall(parser->output->Document, id_new, 1, nodes);
 }
 
 typedef struct s_emitter {
@@ -344,6 +362,17 @@ void ckdl_emit_node(kdl_emitter *emitter, VALUE node) {
 
     VALUE props = rb_funcall(node, id_props, 0);
     rb_hash_foreach(props, ckdl_emit_property, (VALUE)emitter);
+
+    VALUE children = rb_funcall(node, id_children, 0);
+    count = RARRAY_LEN(children);
+    if (count > 0) {
+        kdl_start_emitting_children(emitter);
+        for (int i = 0; i < count; i++) {
+            VALUE node = rb_ary_entry(children, i);
+            ckdl_emit_node(emitter, node);
+        }
+        kdl_finish_emitting_children(emitter);
+    }
 
 }
 
@@ -437,6 +466,18 @@ VALUE rb_ckdl_emitter_create_stream_emitter(VALUE self, VALUE io, VALUE version,
     return Qnil;
 }
 
+void ckdl_set_output_module(output_module *output, VALUE kdl_module) {
+    output->Document = rb_const_get(kdl_module, rb_intern("Document"));
+    output->Node = rb_const_get(kdl_module, rb_intern("Node"));
+    output->Value = rb_const_get(kdl_module, rb_intern("Value"));
+    output->ValueString = rb_const_get(output->Value, rb_intern("String"));
+    output->ValueInt = rb_const_get(output->Value, rb_intern("Int"));
+    output->ValueFloat = rb_const_get(output->Value, rb_intern("Float"));
+    output->ValueBool = rb_const_get(output->Value, rb_intern("Boolean"));
+    output->ValueNull = rb_const_get(output->Value, rb_intern("NullImpl"));
+    output->Null = rb_const_get(output->Value, rb_intern("Null"));
+}
+
 RUBY_FUNC_EXPORTED void
 Init_libckdl(void)
 {
@@ -451,15 +492,8 @@ Init_libckdl(void)
     id_bigdecimal = rb_intern("BigDecimal");
 
     rb_mKDL = rb_const_get(rb_cObject, rb_intern("KDL"));
-    rb_cDocument = rb_const_get(rb_mKDL, rb_intern("Document"));
-    rb_cNode = rb_const_get(rb_mKDL, rb_intern("Node"));
-    rb_cValue = rb_const_get(rb_mKDL, rb_intern("Value"));
-    rb_cValueString = rb_const_get(rb_cValue, rb_intern("String"));
-    rb_cValueInt = rb_const_get(rb_cValue, rb_intern("Int"));
-    rb_cValueFloat = rb_const_get(rb_cValue, rb_intern("Float"));
-    rb_cValueBool = rb_const_get(rb_cValue, rb_intern("Boolean"));
-    rb_cValueNull = rb_const_get(rb_cValue, rb_intern("NullImpl"));
-    rb_KDLNull = rb_const_get(rb_cValue, rb_intern("Null"));
+    ckdl_set_output_module(&KDL, rb_mKDL);
+    ckdl_set_output_module(&KDL_V1, rb_const_get(rb_mKDL, rb_intern("V1")));
 
     rb_cBigDecimal = rb_const_get(rb_cObject, rb_intern("BigDecimal"));
 
@@ -500,8 +534,8 @@ Init_libckdl(void)
 
     rb_define_method(rb_cParser, "parse", rb_ckdl_parser_parse, 0);
 
-    rb_define_private_method(rb_cParser, "create_string_parser", rb_ckdl_parser_create_string_parser, 2);
-    rb_define_private_method(rb_cParser, "create_stream_parser", rb_ckdl_parser_create_stream_parser, 2);
+    rb_define_private_method(rb_cParser, "create_string_parser", rb_ckdl_parser_create_string_parser, 3);
+    rb_define_private_method(rb_cParser, "create_stream_parser", rb_ckdl_parser_create_stream_parser, 3);
 
     rb_cEmitter = rb_define_class_under(rb_mCKDL, "Emitter", rb_cObject);
     rb_define_alloc_func(rb_cEmitter, emitter_alloc);

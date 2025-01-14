@@ -36,6 +36,12 @@ module CKDL
         Emitter.new(version:).emit_node(self)
       end
     end
+    class KDL::Node
+      alias old_to_s to_s
+      def inspect(level = 0)
+        old_to_s(level, :inspect)
+      end
+    end
     KDL::Node.prepend(Node)
 
     module Value
