@@ -21,6 +21,7 @@ ID id_props;
 ID id_children;
 ID id_as_type;
 ID id_bigdecimal;
+ID id_stringify_value;
 
 VALUE ckdl_str(kdl_str const *str) {
     if (!str->data) return Qnil;
@@ -130,13 +131,17 @@ kdl_number ckdl_int(VALUE val) {
     return num;
 }
 
+VALUE ckdl_stringify_big_decimal(VALUE val) {
+    VALUE kdl_float = rb_funcall(KDL.ValueFloat, id_new, 1, val);
+    return rb_funcall(kdl_float, id_stringify_value, 0);
+}
+ 
 kdl_number ckdl_dbl(VALUE val) {
     kdl_number num;
     if (rb_obj_is_kind_of(val, rb_cBigDecimal)) {
         num.type = KDL_NUMBER_TYPE_STRING_ENCODED;
         VALUE str = rb_String(val);
-        printf("emit str: %s\n", StringValueCStr(str));
-        num.string = ckdl_kstr(rb_String(val));
+        num.string = ckdl_kstr(ckdl_stringify_big_decimal(val));
     } else {
         num.type = KDL_NUMBER_TYPE_FLOATING_POINT;
         num.floating_point = rb_num2dbl(val);
@@ -490,6 +495,7 @@ Init_libckdl(void)
     id_children = rb_intern("children");
     id_as_type = rb_intern("as_type");
     id_bigdecimal = rb_intern("BigDecimal");
+    id_stringify_value = rb_intern("stringify_value");
 
     rb_mKDL = rb_const_get(rb_cObject, rb_intern("KDL"));
     ckdl_set_output_module(&KDL, rb_mKDL);

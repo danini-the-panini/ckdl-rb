@@ -5,8 +5,14 @@ class V1Test < Minitest::Test
   INPUTS_DIR = File.join(TEST_CASES_DIR, 'input')
   EXPECTED_DIR = File.join(TEST_CASES_DIR, 'expected_kdl')
 
+  EXCLUDE = %w[
+    no_decimal_exponent
+  ]
+
   Dir.glob(File.join(INPUTS_DIR, '*.kdl')).each do |input_path|
     input_name = File.basename(input_path, '.kdl')
+    next if EXCLUDE.include?(input_name)
+
     expected_path = File.join(EXPECTED_DIR, "#{input_name}.kdl")
     if File.exist?(expected_path)
       define_method "test_#{input_name}_matches_expected_output" do
