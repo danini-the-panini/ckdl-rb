@@ -105,8 +105,13 @@ VALUE rb_ckdl_parser_create_string_parser(VALUE self, VALUE string, VALUE versio
 
 size_t ckdl_read_io(void *user_data, char *buf, size_t bufsize) {
     VALUE io = (VALUE)user_data;
-    // TODO: figure out how to read from IO?
-    return 0;
+    size_t n = 0;
+    while (n < bufsize) {
+        VALUE byte = rb_io_getbyte(io);
+        if (NIL_P(byte)) return n;
+        buf[n++] = (char)rb_fix2ushort(byte);
+    }
+    return n;
 }
 
 VALUE rb_ckdl_parser_create_stream_parser(VALUE self, VALUE io, VALUE version, VALUE output_version) {
@@ -300,36 +305,23 @@ VALUE rb_ckdl_parser_parse(VALUE self) {
 }
 
 typedef struct s_emitter {
-    kdl_emitter *emitter;
-    int stream;
+    kdl_emitter_options options;
+    VALUE io;
 } Emitter;
-
-void free_emitter(Emitter *emitter) {
-    if (emitter->emitter) {
-        kdl_destroy_emitter(emitter->emitter);
-        emitter->emitter = NULL;
-    }
-    free(emitter);
-}
 
 static const rb_data_type_t emitter_type = {
     .wrap_struct_name = "kdl_emitter",
-    .function = {
-        .dfree = RBIMPL_DATA_FUNC(free_emitter),
-        .dsize = 0
-    },
-    .flags = RUBY_TYPED_FREE_IMMEDIATELY
+    .function = { .dsize = 0 },
+    .flags = 0
 };
 
 VALUE emitter_alloc(VALUE self) {
     Emitter *emitter = malloc(sizeof(Emitter));
-    emitter->emitter = NULL;
     return TypedData_Wrap_Struct(self, &emitter_type, emitter);
 }
 
-VALUE ckdl_emitter_buffer(Emitter *emitter) {
-    if (emitter->stream) return Qnil;
-    kdl_str buffer = kdl_get_emitter_buffer(emitter->emitter);
+VALUE ckdl_emitter_buffer(kdl_emitter *emitter) {
+    kdl_str buffer = kdl_get_emitter_buffer(emitter);
     return ckdl_str(&buffer);
 }
 
@@ -378,37 +370,65 @@ void ckdl_emit_node(kdl_emitter *emitter, VALUE node) {
         }
         kdl_finish_emitting_children(emitter);
     }
+}
 
+size_t ckdl_write_io(void *user_data, const char *data, size_t nbytes) {
+    VALUE io = (VALUE)user_data;
+    VALUE str = rb_utf8_str_new(data, nbytes);
+    rb_io_write(io, str);
+    return nbytes;
+}
+
+kdl_emitter *ckdl_create_emitter(Emitter *emitter) {
+    if (NIL_P(emitter->io)) {
+        return kdl_create_buffering_emitter(&emitter->options);
+    } else {
+        return kdl_create_stream_emitter(ckdl_write_io, (void*)emitter->io, &emitter->options);
+    }
+}
+
+VALUE ckdl_finalize_emitter(Emitter *emitter, kdl_emitter *kemitter) {
+    VALUE ret = Qnil;
+    if (NIL_P(emitter->io)) {
+        ret = ckdl_emitter_buffer(kemitter);
+    }
+    kdl_destroy_emitter(kemitter);
+    return ret;
 }
 
 VALUE rb_ckdl_emitter_emit_document(VALUE self, VALUE document) {
     Emitter *emitter;
     TypedData_Get_Struct(self, Emitter, &emitter_type, emitter);
+    kdl_emitter *kemitter = ckdl_create_emitter(emitter);
 
     VALUE nodes = rb_funcall(document, rb_intern("nodes"), 0);
     long count = RARRAY_LEN(nodes);
     for (int i = 0; i < count; i++) {
         VALUE node = rb_ary_entry(nodes, i);
-        ckdl_emit_node(emitter->emitter, node);
+        ckdl_emit_node(kemitter, node);
     }
 
-    kdl_emit_end(emitter->emitter);
-
-    return ckdl_emitter_buffer(emitter);
+    return ckdl_finalize_emitter(emitter, kemitter);
 }
 
 VALUE rb_ckdl_emitter_emit_node(VALUE self, VALUE node) {
     Emitter *emitter;
     TypedData_Get_Struct(self, Emitter, &emitter_type, emitter);
+    kdl_emitter *kemitter = ckdl_create_emitter(emitter);
 
-    return ckdl_emitter_buffer(emitter);
+    ckdl_emit_node(kemitter, node);
+
+    return ckdl_finalize_emitter(emitter, kemitter);
 }
 
 VALUE rb_ckdl_emitter_emit_value(VALUE self, VALUE value) {
     Emitter *emitter;
     TypedData_Get_Struct(self, Emitter, &emitter_type, emitter);
+    kdl_emitter *kemitter = ckdl_create_emitter(emitter);
 
-    return ckdl_emitter_buffer(emitter);
+    ckdl_emit_arg(kemitter, value);
+
+    return ckdl_finalize_emitter(emitter, kemitter);
 }
 
 void ckdl_set_float_mode(VALUE float_mode, kdl_emitter_options *options) {
@@ -439,34 +459,14 @@ void ckdl_set_emitter_options(VALUE version, VALUE escape_mode, VALUE identifier
     if (!NIL_P(float_mode)) ckdl_set_float_mode(float_mode, options);
 }
 
-VALUE rb_ckdl_emitter_create_buffering_emitter(VALUE self, VALUE version, VALUE escape_mode, VALUE identifier_mode, VALUE float_mode) {
+VALUE rb_ckdl_set_emitter_options(VALUE self, VALUE version, VALUE escape_mode, VALUE identifier_mode, VALUE float_mode) {
     Emitter *emitter;
     TypedData_Get_Struct(self, Emitter, &emitter_type, emitter);
-    emitter->stream = FALSE;
 
-    kdl_emitter_options options = KDL_DEFAULT_EMITTER_OPTIONS;
-    ckdl_set_emitter_options(version, escape_mode, identifier_mode, float_mode, &options);
+    emitter->options = KDL_DEFAULT_EMITTER_OPTIONS;
+    ckdl_set_emitter_options(version, escape_mode, identifier_mode, float_mode, &emitter->options);
 
-    emitter->emitter = kdl_create_buffering_emitter(&options);
-
-    return Qnil;
-}
-
-size_t ckdl_write_io(void *user_data, const char *data, size_t nbytes) {
-    VALUE io = (VALUE)user_data;
-    // TODO: figure out how to write to IO?
-    return 0;
-}
-
-VALUE rb_ckdl_emitter_create_stream_emitter(VALUE self, VALUE io, VALUE version, VALUE escape_mode, VALUE identifier_mode, VALUE float_mode) {
-    Emitter *emitter;
-    TypedData_Get_Struct(self, Emitter, &emitter_type, emitter);
-    emitter->stream = TRUE;
-
-    kdl_emitter_options options = KDL_DEFAULT_EMITTER_OPTIONS;
-    ckdl_set_emitter_options(version, escape_mode, identifier_mode, float_mode, &options);
-
-    emitter->emitter = kdl_create_stream_emitter(ckdl_write_io, (void*)io, &options);
+    emitter->io = rb_iv_get(self, "@io");
 
     return Qnil;
 }
@@ -567,6 +567,5 @@ Init_libckdl(void)
     rb_define_method(rb_cEmitter, "emit_node", rb_ckdl_emitter_emit_node, 1);
     rb_define_method(rb_cEmitter, "emit_value", rb_ckdl_emitter_emit_value, 1);
 
-    rb_define_private_method(rb_cEmitter, "create_buffering_emitter", rb_ckdl_emitter_create_buffering_emitter, 4);
-    rb_define_private_method(rb_cEmitter, "create_stream_emitter", rb_ckdl_emitter_create_stream_emitter, 5);
+    rb_define_private_method(rb_cEmitter, "set_emitter_options", rb_ckdl_set_emitter_options, 4);
 }

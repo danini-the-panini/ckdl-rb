@@ -20,7 +20,7 @@ module CKDL
 
   def load_file(filespec, **options)
     File.open(filespec, 'r:BOM|UTF-8') do |file|
-      load_stream(io, **options)
+      load_stream(file, **options)
     end
   end
 

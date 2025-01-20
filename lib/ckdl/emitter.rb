@@ -17,11 +17,7 @@ module CKDL
       else raise KDL::UnsupportedVersionError.new("Unsupported version '#{version}'", version)
       end
 
-      if io
-        create_stream_emitter(io, version_option, escape_mode, identifier_mode, @float_mode);
-      else
-        create_buffering_emitter(version_option, escape_mode, identifier_mode, @float_mode);
-      end
+      set_emitter_options(version_option, escape_mode, identifier_mode, @float_mode)
     end
 
     module Document
@@ -46,7 +42,7 @@ module CKDL
 
     module Value
       def to_s
-        Emitter.new(version:).emit_value(self)
+        Emitter.new(version:).emit_value(self).strip
       end
     end
     KDL::Value.prepend(Value)

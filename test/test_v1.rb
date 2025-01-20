@@ -17,11 +17,11 @@ class V1Test < Minitest::Test
     if File.exist?(expected_path)
       define_method "test_#{input_name}_matches_expected_output" do
         expected = File.read(expected_path, encoding: Encoding::UTF_8).chomp
-        assert_equal expected, ::KDL.parse(File.read(input_path, encoding: Encoding::UTF_8), version: 1).to_s.chomp
+        assert_equal expected, ::KDL.load_file(input_path, version: 1).to_s.chomp
       end
     else
       define_method "test_#{input_name}_does_not_parse" do
-        assert_raises { ::KDL.parse(File.read(input_path, encoding: Encoding::UTF_8), version: 1) }
+        assert_raises { ::KDL.load_file(input_path, version: 1) }
       end
     end
   end
